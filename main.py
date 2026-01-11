@@ -1,29 +1,17 @@
 """Entry point for the poker game."""
 
 from poker.actions import Action, ActionType
-from poker.deck import Deck
-from poker.game_state import GameState
+from poker.engine import PokerEngine
 
 
 def main() -> None:
-    deck = Deck()
-    deck.shuffle()
+    engine = PokerEngine(players=["P1", "P2"], starting_stack=1000)
+    engine.start_hand()
 
-    players = ["Alice", "Bob"]
-    stacks = {"Alice": 1000, "Bob": 1000}
-    hands = {player: deck.deal(2) for player in players}
-
-    game_state = GameState(
-        players=players,
-        stacks=stacks,
-        pot=0,
-        board=[],
-        hands=hands,
-        current_player="Alice",
-        street="preflop",
-    )
-    game_state.record_action(Action(ActionType.CALL))
-    print(game_state)
+    while engine.game_state and engine.game_state.street != "showdown":
+        current_player = engine.game_state.current_player
+        engine.apply_action(current_player, Action(ActionType.CHECK))
+        print(engine.game_state)
 
 
 if __name__ == "__main__":
