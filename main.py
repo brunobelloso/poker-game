@@ -23,6 +23,17 @@ def main() -> None:
         engine.apply_action(current_player_id, action)
         print(engine.game_state)
 
+    if engine.game_state and engine.game_state.street == "showdown":
+        board = " ".join(str(card) for card in engine.game_state.board)
+        print(f"Final board: {board}")
+        for player in players:
+            hand = " ".join(str(card) for card in engine.game_state.hands[player.id])
+            print(f\"{player.id} hand: {hand}\")
+        if engine.showdown_winner and engine.showdown_hand_rank:
+            print(
+                f\"Winner: {engine.showdown_winner} ({engine.showdown_hand_rank})\"
+            )
+
 
 if __name__ == "__main__":
     main()

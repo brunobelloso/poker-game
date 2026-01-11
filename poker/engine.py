@@ -5,6 +5,7 @@ from typing import List, Optional
 from .actions import Action, ActionType
 from .deck import Deck
 from .game_state import GameState
+from .hand_evaluator import HAND_RANK_NAMES, evaluate_hand
 
 
 class PokerEngine:
@@ -14,6 +15,8 @@ class PokerEngine:
         self.game_state: Optional[GameState] = None
         self.deck: Optional[Deck] = None
         self.actions_this_street = 0
+        self.showdown_winner: Optional[str] = None
+        self.showdown_hand_rank: Optional[str] = None
 
     def start_hand(self) -> None:
         self.deck = Deck()
@@ -32,6 +35,8 @@ class PokerEngine:
             street="preflop",
         )
         self.actions_this_street = 0
+        self.showdown_winner = None
+        self.showdown_hand_rank = None
 
     def get_legal_actions(self, player_id: str) -> List[Action]:
         return [
@@ -75,7 +80,26 @@ class PokerEngine:
             self.game_state.street = "river"
         elif self.game_state.street == "river":
             self.game_state.street = "showdown"
+            self.resolve_showdown()
 
         if self.game_state.street != "showdown":
             self.game_state.current_player = self.players[0]
             self.actions_this_street = 0
+
+    def resolve_showdown(self) -> None:
+        if self.game_state is None:
+            raise RuntimeError("Hand has not been started.")
+
+        results = {}
+        for player in self.players:
+            player_cards = self.game_state.hands.get(player, [])
+            combined = player_cards + self.game_state.board
+            results[player] = evaluate_hand(combined)
+
+        winner = max(results, key=results.get)
+        winning_rank = HAND_RANK_NAMES[results[winner][0]]
+        self.game_state.stacks[winner] += self.game_state.pot
+        self.game_state.pot = 0
+        self.showdown_winner = winner
+        self.showdown_hand_rank = winning_rank
+        print(f\"Winner: {winner} with {winning_rank}\")
