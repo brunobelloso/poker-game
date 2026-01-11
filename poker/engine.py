@@ -68,10 +68,10 @@ class PokerEngine:
             self.game_state.board.extend(self.deck.deal(3))
             self.game_state.street = "flop"
         elif self.game_state.street == "flop":
-            self.game_state.board.extend(self.deck.deal(1))
+            self.game_state.board.append(self.deck.deal(1))
             self.game_state.street = "turn"
         elif self.game_state.street == "turn":
-            self.game_state.board.extend(self.deck.deal(1))
+            self.game_state.board.append(self.deck.deal(1))
             self.game_state.street = "river"
         elif self.game_state.street == "river":
             self.game_state.street = "showdown"
