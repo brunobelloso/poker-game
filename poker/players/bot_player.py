@@ -4,6 +4,7 @@ from poker.actions import Action, ActionType
 from poker.cards import Card, RANKS, SUITS
 from poker.game_state import GameState
 from poker.hand_evaluator import HIGH_CARD, ONE_PAIR, TWO_PAIR, evaluate_hand
+from poker.monte_carlo import estimate_equity
 from poker.players.base_player import BasePlayer
 
 
@@ -26,16 +27,21 @@ class BotPlayer(BasePlayer):
         if hand_rank >= TWO_PAIR:
             return self._pick_action(legal_types, ActionType.RAISE, amount=10)
         if hand_rank == ONE_PAIR:
-            return self._pick_action(
-                legal_types, ActionType.CHECK, fallback=ActionType.CALL
-            )
+            equity = estimate_equity(hole_cards, game_state.board, iterations=300)
+            pot_odds = self.calculate_pot_odds(game_state, call_amount)
+            if equity >= pot_odds:
+                return self._pick_action(
+                    legal_types, ActionType.CALL, fallback=ActionType.CHECK
+                )
+            return self._pick_action(legal_types, ActionType.FOLD)
         if hand_rank == HIGH_CARD:
             has_draw = self.detect_flush_draw(combined) or self.detect_straight_draw(
                 combined
             )
             if has_draw:
+                equity = estimate_equity(hole_cards, game_state.board, iterations=300)
                 pot_odds = self.calculate_pot_odds(game_state, call_amount)
-                if pot_odds <= 0.35:
+                if equity >= pot_odds:
                     return self._pick_action(
                         legal_types, ActionType.CALL, fallback=ActionType.CHECK
                     )
