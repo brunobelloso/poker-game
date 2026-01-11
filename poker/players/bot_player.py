@@ -10,22 +10,22 @@ from poker.players.base_player import BasePlayer
 
 class BotPlayer(BasePlayer):
     def decide(self, game_state: GameState):
-        legal_actions = self._get_legal_actions()
-        legal_types = {action.type for action in legal_actions}
+        legal_types = set(self._get_legal_actions())
 
         hole_cards = game_state.hands.get(self.id, [])
         if len(hole_cards) < 2:
             return self._pick_action(legal_types, ActionType.CHECK)
 
         if game_state.street == "preflop":
-            return self._decide_preflop(hole_cards, legal_types)
+            return self._decide_preflop(hole_cards, legal_types, game_state)
 
         combined = hole_cards + game_state.board
         filled = self._complete_to_seven_cards(combined)
         hand_rank = evaluate_hand(filled)[0]
-        call_amount = 10
+        call_amount = game_state.to_call(self.id)
+        raise_to = self._default_raise_to(game_state)
         if hand_rank >= TWO_PAIR:
-            return self._pick_action(legal_types, ActionType.RAISE, amount=10)
+            return self._pick_action(legal_types, ActionType.RAISE, amount=raise_to)
         if hand_rank == ONE_PAIR:
             equity = estimate_equity(hole_cards, game_state.board, iterations=300)
             pot_odds = self.calculate_pot_odds(game_state, call_amount)
@@ -52,9 +52,11 @@ class BotPlayer(BasePlayer):
     def _get_legal_actions(self):
         if self.engine and hasattr(self.engine, "get_legal_actions"):
             return self.engine.get_legal_actions(self.id)
-        return [Action(action_type) for action_type in ActionType]
+        return list(ActionType)
 
     def calculate_pot_odds(self, game_state: GameState, call_amount: int) -> float:
+        if call_amount <= 0:
+            return 0.0
         return call_amount / (game_state.pot + call_amount)
 
     def detect_flush_draw(self, cards: list[Card]) -> bool:
@@ -73,9 +75,10 @@ class BotPlayer(BasePlayer):
                 return True
         return False
 
-    def _decide_preflop(self, hole_cards, legal_types):
+    def _decide_preflop(self, hole_cards, legal_types, game_state):
         ranks = [card.rank for card in hole_cards]
         rank_set = frozenset(ranks)
+        raise_to = self._default_raise_to(game_state)
 
         strong_pairs = {"A", "K", "Q", "J"}
         medium_pairs = {"10", "9", "8"}
@@ -89,7 +92,7 @@ class BotPlayer(BasePlayer):
         if len(rank_set) == 1:
             pair_rank = ranks[0]
             if pair_rank in strong_pairs:
-                return self._pick_action(legal_types, ActionType.RAISE, amount=10)
+                return self._pick_action(legal_types, ActionType.RAISE, amount=raise_to)
             if pair_rank in medium_pairs:
                 return self._pick_action(
                     legal_types, ActionType.CHECK, fallback=ActionType.CALL
@@ -97,7 +100,7 @@ class BotPlayer(BasePlayer):
             return self._pick_action(legal_types, ActionType.FOLD)
 
         if rank_set in strong_offsuit:
-            return self._pick_action(legal_types, ActionType.RAISE, amount=10)
+            return self._pick_action(legal_types, ActionType.RAISE, amount=raise_to)
         if rank_set in medium_offsuit:
             return self._pick_action(legal_types, ActionType.CHECK, fallback=ActionType.CALL)
 
@@ -135,3 +138,11 @@ class BotPlayer(BasePlayer):
         if ActionType.CALL in legal_types:
             return Action(ActionType.CALL)
         return Action(ActionType.FOLD)
+
+    def _default_raise_to(self, game_state: GameState) -> int:
+        if game_state.current_bet > 0:
+            return max(
+                game_state.current_bet + game_state.big_blind,
+                game_state.current_bet * 2,
+            )
+        return game_state.big_blind
