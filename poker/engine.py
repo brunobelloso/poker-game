@@ -102,4 +102,4 @@ class PokerEngine:
         self.game_state.pot = 0
         self.showdown_winner = winner
         self.showdown_hand_rank = winning_rank
-        print(f\"Winner: {winner} with {winning_rank}\")
+        print(f"Winner: {winner} with {winning_rank}")
