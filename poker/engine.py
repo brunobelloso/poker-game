@@ -1,20 +1,81 @@
 """Poker engine interface."""
 
-from typing import List
+from typing import List, Optional
 
-from .actions import Action
+from .actions import Action, ActionType
+from .deck import Deck
 from .game_state import GameState
 
 
 class PokerEngine:
-    def __init__(self) -> None:
-        self.game_state = GameState()
+    def __init__(self, players: List[str], starting_stack: int) -> None:
+        self.players = players
+        self.starting_stack = starting_stack
+        self.game_state: Optional[GameState] = None
+        self.deck: Optional[Deck] = None
+        self.actions_this_street = 0
 
     def start_hand(self) -> None:
-        raise NotImplementedError
+        self.deck = Deck()
+        self.deck.shuffle()
 
-    def get_legal_actions(self, player_id: int) -> List[Action]:
-        raise NotImplementedError
+        hands = {player: self.deck.deal(2) for player in self.players}
+        stacks = {player: self.starting_stack for player in self.players}
 
-    def apply_action(self, player_id: int, action: Action) -> None:
-        raise NotImplementedError
+        self.game_state = GameState(
+            players=self.players,
+            stacks=stacks,
+            pot=0,
+            board=[],
+            hands=hands,
+            current_player=self.players[0],
+            street="preflop",
+        )
+        self.actions_this_street = 0
+
+    def get_legal_actions(self, player_id: str) -> List[Action]:
+        return [
+            Action(ActionType.CHECK),
+            Action(ActionType.CALL),
+            Action(ActionType.RAISE),
+            Action(ActionType.FOLD),
+        ]
+
+    def apply_action(self, player_id: str, action: Action) -> None:
+        if self.game_state is None:
+            raise RuntimeError("Hand has not been started.")
+        if self.deck is None:
+            raise RuntimeError("Deck is not initialized.")
+
+        self.game_state.record_action(action)
+        if action.amount is not None:
+            self.game_state.add_to_pot(action.amount)
+
+        self.actions_this_street += 1
+        next_player_index = (self.players.index(player_id) + 1) % len(self.players)
+        self.game_state.current_player = self.players[next_player_index]
+
+        if self.actions_this_street >= len(self.players):
+            self.advance_street()
+
+    def advance_street(self) -> None:
+        if self.game_state is None:
+            raise RuntimeError("Hand has not been started.")
+        if self.deck is None:
+            raise RuntimeError("Deck is not initialized.")
+
+        if self.game_state.street == "preflop":
+            self.game_state.board.extend(self.deck.deal(3))
+            self.game_state.street = "flop"
+        elif self.game_state.street == "flop":
+            self.game_state.board.extend(self.deck.deal(1))
+            self.game_state.street = "turn"
+        elif self.game_state.street == "turn":
+            self.game_state.board.extend(self.deck.deal(1))
+            self.game_state.street = "river"
+        elif self.game_state.street == "river":
+            self.game_state.street = "showdown"
+
+        if self.game_state.street != "showdown":
+            self.game_state.current_player = self.players[0]
+            self.actions_this_street = 0
