@@ -9,6 +9,46 @@ from poker.players.base_player import BasePlayer
 
 
 class BotPlayer(BasePlayer):
+    STYLE_PROFILES = {
+        "balanced": {
+            "preflop_tightness": 0.5,
+            "aggression": 0.5,
+            "bluff_frequency": 0.0,
+            "equity_threshold_modifier": 0.0,
+        },
+        "tight": {
+            "preflop_tightness": 0.8,
+            "aggression": 0.4,
+            "bluff_frequency": 0.0,
+            "equity_threshold_modifier": 0.05,
+        },
+        "loose": {
+            "preflop_tightness": 0.3,
+            "aggression": 0.4,
+            "bluff_frequency": 0.0,
+            "equity_threshold_modifier": -0.05,
+        },
+        "aggro": {
+            "preflop_tightness": 0.4,
+            "aggression": 0.8,
+            "bluff_frequency": 0.0,
+            "equity_threshold_modifier": -0.02,
+        },
+        "passive": {
+            "preflop_tightness": 0.6,
+            "aggression": 0.2,
+            "bluff_frequency": 0.0,
+            "equity_threshold_modifier": 0.02,
+        },
+    }
+
+    def __init__(self, player_id: str, style: str = "balanced") -> None:
+        super().__init__(player_id)
+        self.style = style
+        self.style_profile = self.STYLE_PROFILES.get(
+            style, self.STYLE_PROFILES["balanced"]
+        )
+
     def decide(self, game_state: GameState):
         legal_types = set(self._get_legal_actions())
 
@@ -24,12 +64,18 @@ class BotPlayer(BasePlayer):
         hand_rank = evaluate_hand(filled)[0]
         call_amount = game_state.to_call(self.id)
         raise_to = self._default_raise_to(game_state)
+        aggression = self.style_profile["aggression"]
         if hand_rank >= TWO_PAIR:
-            return self._pick_action(legal_types, ActionType.RAISE, amount=raise_to)
+            if aggression >= 0.5:
+                return self._pick_action(legal_types, ActionType.RAISE, amount=raise_to)
+            return self._pick_action(
+                legal_types, ActionType.CHECK, fallback=ActionType.CALL
+            )
         if hand_rank == ONE_PAIR:
             equity = estimate_equity(hole_cards, game_state.board, iterations=300)
             pot_odds = self.calculate_pot_odds(game_state, call_amount)
-            if equity >= pot_odds:
+            effective_equity = equity + self.style_profile["equity_threshold_modifier"]
+            if effective_equity >= pot_odds:
                 return self._pick_action(
                     legal_types, ActionType.CALL, fallback=ActionType.CHECK
                 )
@@ -41,7 +87,8 @@ class BotPlayer(BasePlayer):
             if has_draw:
                 equity = estimate_equity(hole_cards, game_state.board, iterations=300)
                 pot_odds = self.calculate_pot_odds(game_state, call_amount)
-                if equity >= pot_odds:
+                effective_equity = equity + self.style_profile["equity_threshold_modifier"]
+                if effective_equity >= pot_odds:
                     return self._pick_action(
                         legal_types, ActionType.CALL, fallback=ActionType.CHECK
                     )
@@ -79,6 +126,8 @@ class BotPlayer(BasePlayer):
         ranks = [card.rank for card in hole_cards]
         rank_set = frozenset(ranks)
         raise_to = self._default_raise_to(game_state)
+        preflop_tightness = self.style_profile["preflop_tightness"]
+        aggression = self.style_profile["aggression"]
 
         strong_pairs = {"A", "K", "Q", "J"}
         medium_pairs = {"10", "9", "8"}
@@ -92,16 +141,26 @@ class BotPlayer(BasePlayer):
         if len(rank_set) == 1:
             pair_rank = ranks[0]
             if pair_rank in strong_pairs:
-                return self._pick_action(legal_types, ActionType.RAISE, amount=raise_to)
+                if aggression >= 0.5:
+                    return self._pick_action(legal_types, ActionType.RAISE, amount=raise_to)
+                return self._pick_action(
+                    legal_types, ActionType.CHECK, fallback=ActionType.CALL
+                )
             if pair_rank in medium_pairs:
+                if preflop_tightness >= 0.6:
+                    return self._pick_action(legal_types, ActionType.FOLD)
                 return self._pick_action(
                     legal_types, ActionType.CHECK, fallback=ActionType.CALL
                 )
             return self._pick_action(legal_types, ActionType.FOLD)
 
         if rank_set in strong_offsuit:
-            return self._pick_action(legal_types, ActionType.RAISE, amount=raise_to)
+            if aggression >= 0.5:
+                return self._pick_action(legal_types, ActionType.RAISE, amount=raise_to)
+            return self._pick_action(legal_types, ActionType.CHECK, fallback=ActionType.CALL)
         if rank_set in medium_offsuit:
+            if preflop_tightness >= 0.6:
+                return self._pick_action(legal_types, ActionType.FOLD)
             return self._pick_action(legal_types, ActionType.CHECK, fallback=ActionType.CALL)
 
         return self._pick_action(legal_types, ActionType.FOLD)
