@@ -30,6 +30,8 @@ class GameState:
         bets: Optional[Dict[str, int]] = None,
         players_to_act: Optional[Set[str]] = None,
         last_raiser: Optional[str] = None,
+        hand_number: int = 0,
+        last_winner: Optional[str] = None,
     ) -> None:
         self.players = players
         self.stacks = stacks
@@ -50,6 +52,8 @@ class GameState:
         self.bets = bets or {player: 0 for player in self.players_in_hand}
         self.players_to_act = players_to_act or set(self.players_in_hand)
         self.last_raiser = last_raiser
+        self.hand_number = hand_number
+        self.last_winner = last_winner
 
     def add_to_pot(self, amount: int) -> None:
         self.pot += amount
@@ -82,6 +86,8 @@ class GameState:
             f"current_bet={self.current_bet}, "
             f"bets={self.bets}, "
             f"action_history={self.action_history}, "
-            f"players_in_hand={self.players_in_hand}"
+            f"players_in_hand={self.players_in_hand}, "
+            f"hand_number={self.hand_number}, "
+            f"last_winner={self.last_winner}"
             ")"
         )

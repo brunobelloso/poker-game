@@ -32,7 +32,12 @@ class PokerEngine:
         self.deck.shuffle()
 
         hands = {player: self.deck.deal(2) for player in self.players}
-        stacks = {player: self.starting_stack for player in self.players}
+        if self.game_state is None:
+            stacks = {player: self.starting_stack for player in self.players}
+            hand_number = 0
+        else:
+            stacks = self.game_state.stacks
+            hand_number = self.game_state.hand_number
 
         self.game_state = GameState(
             players=self.players,
@@ -47,6 +52,8 @@ class PokerEngine:
             dealer_index=self.dealer_index,
             small_blind=self.small_blind,
             big_blind=self.big_blind,
+            hand_number=hand_number,
+            last_winner=None,
         )
         self._post_blinds()
         self.showdown_winner = None
@@ -95,9 +102,8 @@ class PokerEngine:
             self.game_state.players_to_act.discard(player_id)
             if len(self.game_state.players_in_hand) == 1:
                 winner = next(iter(self.game_state.players_in_hand))
-                self._award_pot(winner, "Uncontested")
-                self.game_state.street = "showdown"
-                self.game_state.current_player = None
+                self.showdown_hand_rank = "Uncontested"
+                self.end_hand(winner)
                 return
         elif action.type == ActionType.CHECK:
             if call_amt != 0:
@@ -186,8 +192,9 @@ class PokerEngine:
 
         winner = max(results, key=results.get)
         winning_rank = HAND_RANK_NAMES[results[winner][0]]
-        self._award_pot(winner, winning_rank)
+        self.showdown_hand_rank = winning_rank
         print(f"Winner: {winner} with {winning_rank}")
+        self.end_hand(winner)
 
     def _post_blinds(self) -> None:
         if self.game_state is None:
@@ -265,4 +272,42 @@ class PokerEngine:
         self.game_state.pot = 0
         self.showdown_winner = winner
         self.showdown_hand_rank = hand_rank
-        self.dealer_index = (self.dealer_index + 1) % len(self.players)
+
+    def end_hand(self, winner_id: str) -> List[str]:
+        if self.game_state is None:
+            return []
+
+        if self.game_state.pot > 0:
+            hand_rank = self.showdown_hand_rank or "Uncontested"
+            self._award_pot(winner_id, hand_rank)
+
+        self.game_state.last_winner = winner_id
+        self.game_state.pot = 0
+        self.game_state.board = []
+        self.game_state.hands = {}
+        self.game_state.bets = {}
+        self.game_state.players_to_act = set()
+        self.game_state.players_acted = set()
+        self.game_state.players_in_hand = set(self.players)
+        self.game_state.current_player = None
+        self.game_state.current_bet = 0
+        self.game_state.last_raiser = None
+        self.game_state.street = "showdown"
+        self.game_state.hand_number += 1
+
+        if self.players:
+            self.dealer_index = (self.dealer_index + 1) % len(self.players)
+
+        eliminated = [
+            player for player, stack in self.game_state.stacks.items() if stack == 0
+        ]
+        if eliminated:
+            self.players = [player for player in self.players if player not in eliminated]
+            for player in eliminated:
+                self.game_state.stacks.pop(player, None)
+            self.game_state.players = self.players
+            self.game_state.players_in_hand = set(self.players)
+            if self.players and self.dealer_index >= len(self.players):
+                self.dealer_index = 0
+
+        return self.players
