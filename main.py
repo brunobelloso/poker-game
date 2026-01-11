@@ -28,10 +28,10 @@ def main() -> None:
         print(f"Final board: {board}")
         for player in players:
             hand = " ".join(str(card) for card in engine.game_state.hands[player.id])
-            print(f\"{player.id} hand: {hand}\")
+            print(f"{player.id} hand: {hand}")
         if engine.showdown_winner and engine.showdown_hand_rank:
             print(
-                f\"Winner: {engine.showdown_winner} ({engine.showdown_hand_rank})\"
+                f"Winner: {engine.showdown_winner} ({engine.showdown_hand_rank})"
             )
 
 
