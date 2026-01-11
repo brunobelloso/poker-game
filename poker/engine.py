@@ -14,7 +14,7 @@ class PokerEngine:
         self.starting_stack = starting_stack
         self.game_state: Optional[GameState] = None
         self.deck: Optional[Deck] = None
-        self.actions_this_street = 0
+        self.current_player_index = 0
         self.showdown_winner: Optional[str] = None
         self.showdown_hand_rank: Optional[str] = None
 
@@ -33,8 +33,10 @@ class PokerEngine:
             hands=hands,
             current_player=self.players[0],
             street="preflop",
+            players_in_hand=set(self.players),
+            players_acted=set(),
         )
-        self.actions_this_street = 0
+        self.current_player_index = 0
         self.showdown_winner = None
         self.showdown_hand_rank = None
 
@@ -46,6 +48,27 @@ class PokerEngine:
             Action(ActionType.FOLD),
         ]
 
+    def next_player(self) -> None:
+        if self.game_state is None:
+            raise RuntimeError("Hand has not been started.")
+
+        if not self.game_state.players_in_hand:
+            self.game_state.current_player = None
+            return
+
+        starting_index = self.current_player_index
+        while True:
+            self.current_player_index = (self.current_player_index + 1) % len(
+                self.players
+            )
+            candidate = self.players[self.current_player_index]
+            if candidate in self.game_state.players_in_hand:
+                self.game_state.current_player = candidate
+                return
+            if self.current_player_index == starting_index:
+                self.game_state.current_player = None
+                return
+
     def apply_action(self, player_id: str, action: Action) -> None:
         if self.game_state is None:
             raise RuntimeError("Hand has not been started.")
@@ -56,11 +79,13 @@ class PokerEngine:
         if action.amount is not None:
             self.game_state.add_to_pot(action.amount)
 
-        self.actions_this_street += 1
-        next_player_index = (self.players.index(player_id) + 1) % len(self.players)
-        self.game_state.current_player = self.players[next_player_index]
+        if action.action_type == ActionType.FOLD:
+            self.game_state.players_in_hand.discard(player_id)
 
-        if self.actions_this_street >= len(self.players):
+        self.game_state.players_acted.add(player_id)
+        self.next_player()
+
+        if self.game_state.players_in_hand.issubset(self.game_state.players_acted):
             self.advance_street()
 
     def advance_street(self) -> None:
@@ -83,15 +108,16 @@ class PokerEngine:
             self.resolve_showdown()
 
         if self.game_state.street != "showdown":
-            self.game_state.current_player = self.players[0]
-            self.actions_this_street = 0
+            self.game_state.players_acted = set()
+            self.current_player_index = -1
+            self.next_player()
 
     def resolve_showdown(self) -> None:
         if self.game_state is None:
             raise RuntimeError("Hand has not been started.")
 
         results = {}
-        for player in self.players:
+        for player in self.game_state.players_in_hand:
             player_cards = self.game_state.hands.get(player, [])
             combined = player_cards + self.game_state.board
             results[player] = evaluate_hand(combined)

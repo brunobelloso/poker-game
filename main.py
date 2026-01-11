@@ -8,7 +8,9 @@ from poker.players.human_player import HumanPlayer
 def main() -> None:
     player_one = HumanPlayer("P1")
     player_two = BotPlayer("P2")
-    players = [player_one, player_two]
+    player_three = BotPlayer("P3")
+    player_four = BotPlayer("P4")
+    players = [player_one, player_two, player_three, player_four]
     engine = PokerEngine(players=[player.id for player in players], starting_stack=1000)
     for player in players:
         player.engine = engine
