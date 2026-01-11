@@ -54,15 +54,22 @@ class PokerEngine:
             big_blind=self.big_blind,
             hand_number=hand_number,
             last_winner=None,
+            total_contrib={player: 0 for player in self.players},
+            all_in_players=set(),
+            side_pots=[],
         )
         self._post_blinds()
         self.showdown_winner = None
         self.showdown_hand_rank = None
+        if self.game_state and not self._can_act_players():
+            self._fast_forward_to_showdown()
 
     def get_legal_actions(self, player_id: str) -> List[ActionType]:
         if self.game_state is None:
             raise RuntimeError("Hand has not been started.")
         if player_id not in self.game_state.players_in_hand:
+            return []
+        if player_id in self.game_state.all_in_players:
             return []
         call_amt = self.game_state.to_call(player_id)
         if call_amt == 0:
@@ -100,6 +107,7 @@ class PokerEngine:
             self.game_state.record_action(action)
             self.game_state.players_in_hand.discard(player_id)
             self.game_state.players_to_act.discard(player_id)
+            self.game_state.all_in_players.discard(player_id)
             if len(self.game_state.players_in_hand) == 1:
                 winner = next(iter(self.game_state.players_in_hand))
                 self.showdown_hand_rank = "Uncontested"
@@ -117,33 +125,49 @@ class PokerEngine:
             self.game_state.stacks[player_id] -= contribution
             self.game_state.bets[player_id] += contribution
             self.game_state.add_to_pot(contribution)
+            self.game_state.add_contribution(player_id, contribution)
             self.game_state.record_action(action)
             self.game_state.players_to_act.discard(player_id)
+            if self.game_state.stacks[player_id] == 0:
+                self.game_state.all_in_players.add(player_id)
         elif action.type == ActionType.RAISE:
             if action.amount is None:
                 raise ValueError("Raise requires a target amount.")
             raise_to = action.amount
             if raise_to <= self.game_state.current_bet:
                 raise ValueError("Raise must increase the current bet.")
-            if raise_to - self.game_state.current_bet < self.game_state.big_blind:
-                raise ValueError("Raise must meet the minimum raise size.")
             needed = raise_to - self.game_state.bets[player_id]
+            if (
+                raise_to - self.game_state.current_bet < self.game_state.big_blind
+                and self.game_state.stacks[player_id] >= needed
+            ):
+                raise ValueError("Raise must meet the minimum raise size.")
             contribution = min(self.game_state.stacks[player_id], needed)
             self.game_state.stacks[player_id] -= contribution
             self.game_state.bets[player_id] += contribution
             self.game_state.add_to_pot(contribution)
-            self.game_state.current_bet = max(
-                self.game_state.current_bet, self.game_state.bets[player_id]
-            )
-            self.game_state.last_raiser = player_id
-            self.game_state.players_to_act = set(self.game_state.players_in_hand) - {
-                player_id
-            }
+            self.game_state.add_contribution(player_id, contribution)
+            if self.game_state.bets[player_id] > self.game_state.current_bet:
+                self.game_state.current_bet = self.game_state.bets[player_id]
+                self.game_state.last_raiser = player_id
+                self.game_state.players_to_act = (
+                    set(self.game_state.players_in_hand)
+                    - {player_id}
+                    - set(self.game_state.all_in_players)
+                )
+            else:
+                self.game_state.players_to_act.discard(player_id)
             self.game_state.record_action(action)
+            if self.game_state.stacks[player_id] == 0:
+                self.game_state.all_in_players.add(player_id)
         else:
             raise ValueError("Unknown action.")
 
         if self.game_state.street == "showdown":
+            return
+
+        if not self._can_act_players():
+            self._fast_forward_to_showdown()
             return
 
         if not self.game_state.players_to_act:
@@ -173,6 +197,9 @@ class PokerEngine:
 
         if self.game_state.street != "showdown":
             self.game_state.reset_betting_round()
+            if not self.game_state.players_to_act:
+                self._fast_forward_to_showdown()
+                return
             first_to_act = self._first_to_act_postflop()
             if first_to_act is None:
                 self.game_state.current_player = None
@@ -190,11 +217,63 @@ class PokerEngine:
             combined = player_cards + self.game_state.board
             results[player] = evaluate_hand(combined)
 
-        winner = max(results, key=results.get)
-        winning_rank = HAND_RANK_NAMES[results[winner][0]]
-        self.showdown_hand_rank = winning_rank
-        print(f"Winner: {winner} with {winning_rank}")
-        self.end_hand(winner)
+        self.game_state.side_pots = self.game_state.compute_side_pots(
+            self.game_state.players_in_hand
+        )
+        dead_money = sum(
+            amount
+            for player, amount in self.game_state.total_contrib.items()
+            if player not in self.game_state.players_in_hand
+        )
+        if dead_money:
+            if self.game_state.side_pots:
+                self.game_state.side_pots[0]["amount"] += dead_money
+            else:
+                self.game_state.side_pots = [
+                    {
+                        "amount": dead_money,
+                        "eligible": set(self.game_state.players_in_hand),
+                    }
+                ]
+
+        winners_summary = []
+        main_pot_winner = None
+        for pot in self.game_state.side_pots:
+            eligible = pot["eligible"]
+            eligible_results = {player: results[player] for player in eligible}
+            winner = max(eligible_results, key=eligible_results.get)
+            best_value = eligible_results[winner]
+            tied = [
+                player
+                for player, value in eligible_results.items()
+                if value == best_value
+            ]
+            share = pot["amount"] // len(tied)
+            remainder = pot["amount"] % len(tied)
+            for player in tied:
+                self.game_state.stacks[player] += share
+            ordered = [player for player in self.players if player in tied]
+            if remainder:
+                self.game_state.stacks[ordered[0]] += remainder
+            winning_rank = HAND_RANK_NAMES[best_value[0]]
+            winners_summary.append((tied, winning_rank, pot["amount"]))
+            main_pot_winner = ordered[0]
+
+        if not self.game_state.side_pots:
+            winner = max(results, key=results.get)
+            winning_rank = HAND_RANK_NAMES[results[winner][0]]
+            self.showdown_hand_rank = winning_rank
+            print(f"Winner: {winner} with {winning_rank}")
+            self.game_state.stacks[winner] += self.game_state.pot
+            self.game_state.pot = 0
+            self.end_hand(winner)
+            return
+
+        self.game_state.pot = 0
+        if winners_summary:
+            for tied, rank, amount in winners_summary:
+                print(f"Pot {amount} winner(s): {tied} with {rank}")
+        self.end_hand(main_pot_winner or self.players[0])
 
     def _post_blinds(self) -> None:
         if self.game_state is None:
@@ -227,7 +306,13 @@ class PokerEngine:
         self.game_state.bets[sb_player] = sb_posted
         self.game_state.bets[bb_player] = bb_posted
         self.game_state.add_to_pot(sb_posted + bb_posted)
+        self.game_state.add_contribution(sb_player, sb_posted)
+        self.game_state.add_contribution(bb_player, bb_posted)
         self.game_state.current_bet = bb_posted
+        if self.game_state.stacks[sb_player] == 0:
+            self.game_state.all_in_players.add(sb_player)
+        if self.game_state.stacks[bb_player] == 0:
+            self.game_state.all_in_players.add(bb_player)
 
         first_to_act_index = self._next_active_index(bb_index)
         if first_to_act_index is None:
@@ -236,9 +321,11 @@ class PokerEngine:
             self.current_player_index = first_to_act_index
             self.game_state.current_player = self.players[self.current_player_index]
 
-        self.game_state.players_to_act = set(self.game_state.players_in_hand) - {
-            bb_player
-        }
+        self.game_state.players_to_act = (
+            set(self.game_state.players_in_hand)
+            - {bb_player}
+            - set(self.game_state.all_in_players)
+        )
 
     def _first_to_act_postflop(self) -> Optional[int]:
         if self.game_state is None:
@@ -261,9 +348,39 @@ class PokerEngine:
         for _ in range(player_count):
             index = (index + 1) % player_count
             candidate = self.players[index]
-            if candidate in self.game_state.players_in_hand:
+            if (
+                candidate in self.game_state.players_in_hand
+                and candidate not in self.game_state.all_in_players
+            ):
                 return index
         return None
+
+    def _can_act_players(self) -> List[str]:
+        if self.game_state is None:
+            return []
+        return [
+            player
+            for player in self.game_state.players_in_hand
+            if player not in self.game_state.all_in_players
+        ]
+
+    def _fast_forward_to_showdown(self) -> None:
+        if self.game_state is None or self.deck is None:
+            return
+        while self.game_state.street != "showdown":
+            if self.game_state.street == "preflop":
+                self.game_state.board.extend(self.deck.deal(3))
+                self.game_state.street = "flop"
+            elif self.game_state.street == "flop":
+                self.game_state.board.append(self.deck.deal(1))
+                self.game_state.street = "turn"
+            elif self.game_state.street == "turn":
+                self.game_state.board.append(self.deck.deal(1))
+                self.game_state.street = "river"
+            elif self.game_state.street == "river":
+                self.game_state.street = "showdown"
+                self.resolve_showdown()
+                return
 
     def _award_pot(self, winner: str, hand_rank: str) -> None:
         if self.game_state is None:
@@ -297,17 +414,5 @@ class PokerEngine:
 
         if self.players:
             self.dealer_index = (self.dealer_index + 1) % len(self.players)
-
-        eliminated = [
-            player for player, stack in self.game_state.stacks.items() if stack == 0
-        ]
-        if eliminated:
-            self.players = [player for player in self.players if player not in eliminated]
-            for player in eliminated:
-                self.game_state.stacks.pop(player, None)
-            self.game_state.players = self.players
-            self.game_state.players_in_hand = set(self.players)
-            if self.players and self.dealer_index >= len(self.players):
-                self.dealer_index = 0
 
         return self.players

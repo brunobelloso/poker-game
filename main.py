@@ -71,6 +71,17 @@ def main() -> None:
         if engine.game_state.last_winner:
             print(f"Hand winner: {engine.game_state.last_winner}")
 
+        if engine.game_state.side_pots:
+            print("Side pots:")
+            for idx, pot in enumerate(engine.game_state.side_pots, start=1):
+                eligible = ", ".join(sorted(pot["eligible"]))
+                print(f"  Pot {idx}: {pot['amount']} | Eligible: {eligible}")
+
+        if engine.game_state.total_contrib:
+            print("Total contributions:")
+            for player_id, amount in engine.game_state.total_contrib.items():
+                print(f"{player_id}: {amount}")
+
         print("Updated stacks:")
         for player_id, stack in engine.game_state.stacks.items():
             print(f"{player_id}: {stack}")
