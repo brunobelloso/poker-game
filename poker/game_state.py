@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
 
 from .actions import Action
 from .cards import Card
@@ -19,6 +19,8 @@ class GameState:
         current_player: Optional[str] = None,
         street: str = "preflop",
         action_history: Optional[List[Action]] = None,
+        players_in_hand: Optional[Set[str]] = None,
+        players_acted: Optional[Set[str]] = None,
     ) -> None:
         self.players = players
         self.stacks = stacks
@@ -28,6 +30,8 @@ class GameState:
         self.current_player = current_player
         self.street = street
         self.action_history = action_history or []
+        self.players_in_hand = players_in_hand or set(players)
+        self.players_acted = players_acted or set()
 
     def add_to_pot(self, amount: int) -> None:
         self.pot += amount
@@ -45,6 +49,7 @@ class GameState:
             f"hands={self.hands}, "
             f"current_player={self.current_player}, "
             f"street={self.street}, "
-            f"action_history={self.action_history}"
+            f"action_history={self.action_history}, "
+            f"players_in_hand={self.players_in_hand}"
             ")"
         )
