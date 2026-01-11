@@ -22,6 +22,7 @@ class BotPlayer(BasePlayer):
         combined = hole_cards + game_state.board
         filled = self._complete_to_seven_cards(combined)
         hand_rank = evaluate_hand(filled)[0]
+        call_amount = 10
         if hand_rank >= TWO_PAIR:
             return self._pick_action(legal_types, ActionType.RAISE, amount=10)
         if hand_rank == ONE_PAIR:
@@ -29,6 +30,15 @@ class BotPlayer(BasePlayer):
                 legal_types, ActionType.CHECK, fallback=ActionType.CALL
             )
         if hand_rank == HIGH_CARD:
+            has_draw = self.detect_flush_draw(combined) or self.detect_straight_draw(
+                combined
+            )
+            if has_draw:
+                pot_odds = self.calculate_pot_odds(game_state, call_amount)
+                if pot_odds <= 0.35:
+                    return self._pick_action(
+                        legal_types, ActionType.CALL, fallback=ActionType.CHECK
+                    )
             return self._pick_action(legal_types, ActionType.FOLD)
 
         return self._pick_action(legal_types, ActionType.CHECK)
@@ -37,6 +47,25 @@ class BotPlayer(BasePlayer):
         if self.engine and hasattr(self.engine, "get_legal_actions"):
             return self.engine.get_legal_actions(self.id)
         return [Action(action_type) for action_type in ActionType]
+
+    def calculate_pot_odds(self, game_state: GameState, call_amount: int) -> float:
+        return call_amount / (game_state.pot + call_amount)
+
+    def detect_flush_draw(self, cards: list[Card]) -> bool:
+        suit_counts = {suit: 0 for suit in SUITS}
+        for card in cards:
+            suit_counts[card.suit] += 1
+        return any(count == 4 for count in suit_counts.values())
+
+    def detect_straight_draw(self, cards: list[Card]) -> bool:
+        rank_values = {rank: index + 2 for index, rank in enumerate(RANKS)}
+        values = {rank_values[card.rank] for card in cards}
+        if "A" in {card.rank for card in cards}:
+            values.add(1)
+        for value in values:
+            if all((value + offset) in values for offset in range(4)):
+                return True
+        return False
 
     def _decide_preflop(self, hole_cards, legal_types):
         ranks = [card.rank for card in hole_cards]
