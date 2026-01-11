@@ -32,9 +32,12 @@ def main() -> None:
             hand = " ".join(str(card) for card in engine.game_state.hands[player.id])
             print(f"{player.id} hand: {hand}")
         if engine.showdown_winner and engine.showdown_hand_rank:
-            print(
-                f"Winner: {engine.showdown_winner} ({engine.showdown_hand_rank})"
-            )
+            print(f"Winner: {engine.showdown_winner} ({engine.showdown_hand_rank})")
+
+        print("Final stacks:")
+        for player in players:
+            stack = engine.game_state.stacks.get(player.id, 0)
+            print(f"{player.id}: {stack}")
 
 
 if __name__ == "__main__":
