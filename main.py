@@ -1,35 +1,7 @@
 """Entry point for the poker game."""
-
-from poker.actions import Action, ActionType
 from poker.engine import PokerEngine
 from poker.players.bot_player import BotPlayer
 from poker.players.human_player import HumanPlayer
-
-
-def prompt_human_action(engine: PokerEngine, player_id: str):
-    game_state = engine.game_state
-    if game_state is None:
-        raise RuntimeError("Game state is not initialized.")
-    print(game_state)
-    legal_actions = engine.get_legal_actions(player_id)
-    to_call = game_state.to_call(player_id)
-    print(
-        f"Current bet: {game_state.current_bet} | To call: {to_call} | "
-        f"Legal actions: {legal_actions}"
-    )
-    while True:
-        choice = input(
-            "Enter action (check, call, raise, fold) or 'quit': "
-        ).strip().lower()
-        if choice == "quit":
-            return None
-        if choice == "raise":
-            amount = int(input("Raise to amount: ").strip())
-            return Action(ActionType.RAISE, amount)
-        try:
-            return Action(ActionType(choice))
-        except ValueError:
-            print("Invalid action. Try again.")
 
 
 def main() -> None:
@@ -55,14 +27,8 @@ def main() -> None:
             if current_player_id is None:
                 break
             current_player = player_by_id[current_player_id]
-            if isinstance(current_player, HumanPlayer):
-                action = prompt_human_action(engine, current_player_id)
-                if action is None:
-                    print("Exiting game.")
-                    return
-            else:
-                action = current_player.decide(engine.game_state)
-            engine.apply_action(current_player_id, action)
+            action = current_player.decide(engine.game_state)
+            engine.apply_action(current_player.id, action)
             print(engine.game_state)
 
         if engine.game_state is None:
